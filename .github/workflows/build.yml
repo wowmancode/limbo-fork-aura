@@ -186,11 +186,23 @@ jobs:
       - name: Build APK
         run: gradle :limbo-android-x86:assembleDebug --stacktrace
 
-      - name: Locate and upload APK
+      - name: Locate APK and verify it contains the emulator
         run: |
           mkdir -p out
           find . -name "*.apk" -path "*limbo-android-x86*" -exec cp {} out/ \;
           ls -la out/
+          apk=$(ls out/*.apk | head -1)
+          libs=$(unzip -l "$apk" | awk '/lib\/.*\.so$/ {printf "%s (%.1f MB)%%0A", $4, $1/1048576}')
+          echo "::notice title=Native libraries in APK::${libs}"
+          # Fail loudly rather than ship an APK that can't boot anything.
+          for required in libqemu-system-x86_64.so liblimbo.so libglib-2.0.so libSDL2.so libpixman-1.so; do
+            if ! unzip -l "$apk" | grep -q "lib/${BUILD_HOST_ABI}/${required}"; then
+              echo "::error title=APK incomplete::${required} for ${BUILD_HOST_ABI} is missing from the APK"
+              exit 1
+            fi
+          done
+        env:
+          BUILD_HOST_ABI: ${{ inputs.build_host || 'arm64-v8a' }}
 
       - uses: actions/upload-artifact@v4
         with:
