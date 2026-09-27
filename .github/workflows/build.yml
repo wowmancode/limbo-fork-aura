@@ -98,32 +98,54 @@ jobs:
         uses: actions/cache@v4
         with:
           path: /tmp/src-cache
-          key: limbo-src-${{ env.QEMU_VERSION }}-${{ env.GLIB_VERSION }}-${{ env.LIBFFI_VERSION }}-${{ env.PIXMAN_VERSION }}-${{ env.SDL2_VERSION }}
+          key: limbo-src-v2-${{ env.QEMU_VERSION }}-${{ env.GLIB_VERSION }}-${{ env.LIBFFI_VERSION }}-${{ env.PIXMAN_VERSION }}-${{ env.SDL2_VERSION }}
 
       - name: Download QEMU, glib, libffi, pixman, SDL2
         if: steps.cache-src.outputs.cache-hit != 'true'
         run: |
           mkdir -p /tmp/src-cache
           cd /tmp/src-cache
-          wget -nv "https://download.qemu-project.org/qemu-${QEMU_VERSION}.tar.xz"
-          wget -nv "https://ftp.gnome.org/pub/GNOME/sources/glib/2.56/glib-${GLIB_VERSION}.tar.xz"
-          wget -nv "https://sourceware.org/pub/libffi/libffi-${LIBFFI_VERSION}.tar.gz"
-          wget -nv "https://www.cairographics.org/releases/pixman-${PIXMAN_VERSION}.tar.gz"
-          wget -nv "https://www.libsdl.org/release/SDL2-${SDL2_VERSION}.tar.gz"
+          # fetch <output file> <url> [fallback url...] - tries each URL in turn
+          fetch() {
+            out="$1"; shift
+            for url in "$@"; do
+              echo "Downloading $out from $url"
+              if curl -fL --retry 3 --retry-delay 5 --connect-timeout 30 -o "$out" "$url"; then
+                return 0
+              fi
+              echo "::warning::Failed: $url"
+            done
+            echo "::error::Could not download $out from any mirror"
+            return 1
+          }
+          fetch qemu.tar.xz \
+            "https://download.qemu.org/qemu-${QEMU_VERSION}.tar.xz" \
+            "https://download.qemu-project.org/qemu-${QEMU_VERSION}.tar.xz"
+          fetch glib.tar.xz \
+            "https://download.gnome.org/sources/glib/2.56/glib-${GLIB_VERSION}.tar.xz" \
+            "https://ftp.gnome.org/pub/GNOME/sources/glib/2.56/glib-${GLIB_VERSION}.tar.xz"
+          fetch libffi.tar.gz \
+            "https://github.com/libffi/libffi/releases/download/v${LIBFFI_VERSION}/libffi-${LIBFFI_VERSION}.tar.gz" \
+            "https://sourceware.org/pub/libffi/libffi-${LIBFFI_VERSION}.tar.gz"
+          fetch pixman.tar.gz \
+            "https://www.cairographics.org/releases/pixman-${PIXMAN_VERSION}.tar.gz" \
+            "https://xorg.freedesktop.org/releases/individual/lib/pixman-${PIXMAN_VERSION}.tar.gz"
+          fetch SDL2.tar.gz \
+            "https://www.libsdl.org/release/SDL2-${SDL2_VERSION}.tar.gz" \
+            "https://github.com/libsdl-org/SDL/releases/download/release-${SDL2_VERSION}/SDL2-${SDL2_VERSION}.tar.gz" \
+            "https://github.com/libsdl-org/SDL/archive/refs/tags/release-${SDL2_VERSION}.tar.gz"
+          ls -la
 
       - name: Extract sources and apply Limbo's patches
         run: |
           cd "${JNI_DIR}"
-          tar -xJf "/tmp/src-cache/qemu-${QEMU_VERSION}.tar.xz"
-          mv "qemu-${QEMU_VERSION}" qemu
-          tar -xJf "/tmp/src-cache/glib-${GLIB_VERSION}.tar.xz"
-          mv "glib-${GLIB_VERSION}" glib
-          tar -xzf "/tmp/src-cache/libffi-${LIBFFI_VERSION}.tar.gz"
-          mv "libffi-${LIBFFI_VERSION}" libffi
-          tar -xzf "/tmp/src-cache/pixman-${PIXMAN_VERSION}.tar.gz"
-          mv "pixman-${PIXMAN_VERSION}" pixman
-          tar -xzf "/tmp/src-cache/SDL2-${SDL2_VERSION}.tar.gz"
-          mv "SDL2-${SDL2_VERSION}" SDL2
+          # Extract each archive into a fixed folder name regardless of the
+          # top-level folder name inside the tarball (it differs between mirrors).
+          for lib in qemu glib libffi pixman SDL2; do
+            archive=$(ls /tmp/src-cache/${lib}.tar.*)
+            mkdir -p "$lib"
+            tar -xf "$archive" --strip-components=1 -C "$lib"
+          done
 
           (cd qemu && patch -p1 < "../patches/qemu-${QEMU_VERSION}.patch")
           (cd glib && patch -p1 < "../patches/glib-${GLIB_VERSION}.patch")
