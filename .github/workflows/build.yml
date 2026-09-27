@@ -40,7 +40,7 @@ jobs:
   java-check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install Android platform 29 and build-tools 29.0.3
         env:
@@ -51,7 +51,7 @@ jobs:
             "platforms;android-29" "build-tools;29.0.3" >/dev/null
 
       - name: Set up JDK 11
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "11"
@@ -67,14 +67,14 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Install native build tools
         run: |
           sudo apt-get update
           sudo apt-get install -y make autoconf automake git python3 python-is-python3 \
             binutils libtool-bin pkg-config flex bison gettext autopoint texinfo rsync \
-            libglib2.0-dev libglib2.0-dev-bin
+            libglib2.0-dev libglib2.0-dev-bin gtk-doc-tools autoconf-archive
 
       # sdkmanager itself needs Java 17+, so install SDK/NDK pieces using the
       # runner's bundled JDK 17 *before* switching to JDK 11 for the old
@@ -89,7 +89,7 @@ jobs:
           echo "NDK_ROOT=${ANDROID_HOME}/ndk/${NDK_VERSION}" >> "$GITHUB_ENV"
 
       - name: Set up JDK 11
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "11"
