@@ -37,9 +37,9 @@ public class Machine extends Observable {
     private String arch;
     private String machineType;
     private String cpu = "Default";
-    private int cpuNum = 2;
-    private int memory = 2048;
-    private int enableMTTCG = 1;
+    private int cpuNum = 1;
+    private int memory = 128;
+    private int enableMTTCG;
     private int enableKVM;
     private int disableACPI = 0;
     private int disableHPET = 0;

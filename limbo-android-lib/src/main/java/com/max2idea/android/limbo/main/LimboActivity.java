@@ -93,7 +93,7 @@ import java.util.Observer;
 
 public class LimboActivity extends AppCompatActivity
         implements MachineController.OnMachineStatusChangeListener,
-        MachineController.OnEventListener, Observer {
+        MachineController.OnEventListener, Observer, QuickStartDialog.Listener {
 
     private static final String TAG = "LimboActivity";
 
@@ -111,6 +111,11 @@ public class LimboActivity extends AppCompatActivity
     private static final int SETTINGS = 13;
     private static final int TOOLS = 14;
     private static final int IMPORT_BIOS_FILE = 15;
+    private static final int QUICK_START = 16;
+
+    // Quick Start: the easy-mode setup screen, and the machine it should boot once loaded
+    private QuickStartDialog quickStartDialog;
+    private volatile String pendingQuickStartName;
 
     // disk mapping
     private static final Hashtable<FileType, DiskInfo> diskMapping = new Hashtable<>();
@@ -954,6 +959,63 @@ public class LimboActivity extends AppCompatActivity
         restore();
         setupListeners();
         addGenericOperatingSystems();
+        offerQuickStartIfNoMachines();
+    }
+
+    /** First run (or all machines deleted): open Quick Start instead of an empty, complex screen. */
+    private void offerQuickStartIfNoMachines() {
+        new Thread(new Runnable() {
+            public void run() {
+                if (MachineController.getInstance().isRunning()
+                        || !MachineController.getInstance().getStoredMachines().isEmpty())
+                    return;
+                new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        if (!isFinishing())
+                            showQuickStart();
+                    }
+                }, 800);
+            }
+        }).start();
+    }
+
+    private void showQuickStart() {
+        if (MachineController.getInstance().isRunning()) {
+            ToastUtils.toastShort(this, "Stop the running machine first");
+            return;
+        }
+        if (quickStartDialog != null && quickStartDialog.isShowing())
+            return;
+        quickStartDialog = new QuickStartDialog(this, this);
+        quickStartDialog.show();
+    }
+
+    @Override
+    public void onQuickStartMachineCreated(String machineName) {
+        // Select the new machine in the normal UI (this loads it), then boot it
+        // once it has loaded - see onEvent(MachineLoaded).
+        pendingQuickStartName = machineName;
+        populateMachines(machineName);
+        ToastUtils.toastShort(this, "Starting " + machineName + "…");
+    }
+
+    private void startPendingQuickStartMachine(Machine machine) {
+        final String pending = pendingQuickStartName;
+        if (pending == null || machine == null || !pending.equals(machine.getName()))
+            return;
+        pendingQuickStartName = null;
+        // Wait until postLoadMachineUI() (scheduled 1s after load) has re-attached the
+        // drive listeners, so nothing resets the drives after we press Start.
+        new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                if (!isFinishing() && getMachine() != null
+                        && pending.equals(getMachine().getName())
+                        && !MachineController.getInstance().isRunning())
+                    mStart.performClick();
+            }
+        }, 2500);
     }
 
     private void setupAppEnvironment() {
@@ -2295,6 +2357,12 @@ public class LimboActivity extends AppCompatActivity
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
 
+        if (requestCode == QuickStartDialog.PICK_FILE_REQUEST_CODE) {
+            if (quickStartDialog != null)
+                quickStartDialog.onFilePicked(resultCode, data);
+            return;
+        }
+
         if (resultCode == Config.SDL_QUIT_RESULT_CODE) {
             if (getParent() != null) {
                 getParent().finish();
@@ -2624,6 +2692,8 @@ public class LimboActivity extends AppCompatActivity
     @Override
     public boolean onPrepareOptionsMenu(Menu menu) {
         menu.clear();
+        if (!MachineController.getInstance().isRunning())
+            menu.add(0, QUICK_START, 0, "Quick Start").setIcon(R.drawable.machinetype);
         menu.add(0, HELP, 0, R.string.help).setIcon(R.drawable.help);
         menu.add(0, INSTALL, 0, R.string.InstallRoms).setIcon(R.drawable.install);
         if(!MachineController.getInstance().isRunning()) {
@@ -2646,6 +2716,9 @@ public class LimboActivity extends AppCompatActivity
         for (int i = 0; i < 2; i++) {
             menu.getItem(i).setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM);
         }
+        MenuItem quickStart = menu.findItem(QUICK_START);
+        if (quickStart != null)
+            quickStart.setShowAsAction(MenuItem.SHOW_AS_ACTION_ALWAYS | MenuItem.SHOW_AS_ACTION_WITH_TEXT);
         return true;
     }
 
@@ -2653,7 +2726,9 @@ public class LimboActivity extends AppCompatActivity
     public boolean onOptionsItemSelected(final MenuItem item) {
 
         super.onOptionsItemSelected(item);
-        if (item.getItemId() == INSTALL) {
+        if (item.getItemId() == QUICK_START) {
+            showQuickStart();
+        } else if (item.getItemId() == INSTALL) {
             Installer.installFiles(this, true);
         } else if (item.getItemId() == DELETE) {
             promptDeleteMachine();
@@ -2808,6 +2883,7 @@ public class LimboActivity extends AppCompatActivity
                 break;
             case MachineLoaded:
                 loadMachine();
+                startPendingQuickStartMachine(machine);
                 break;
             case MachineContinued:
                 new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
