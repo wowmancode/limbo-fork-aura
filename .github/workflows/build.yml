@@ -72,8 +72,9 @@ jobs:
       - name: Install native build tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y make autoconf automake git python3 binutils \
-            libtool-bin pkg-config flex bison gettext texinfo rsync
+          sudo apt-get install -y make autoconf automake git python3 python-is-python3 \
+            binutils libtool-bin pkg-config flex bison gettext autopoint texinfo rsync \
+            libglib2.0-dev libglib2.0-dev-bin
 
       # sdkmanager itself needs Java 17+, so install SDK/NDK pieces using the
       # runner's bundled JDK 17 *before* switching to JDK 11 for the old
@@ -158,7 +159,22 @@ jobs:
           USE_QEMU_VERSION: ${{ env.QEMU_VERSION }}
         run: |
           cd "${JNI_DIR}"
-          make limbo -j"$(nproc)"
+          set +e
+          make limbo BUILD_THREADS="$(nproc)" 2>&1 | tee /tmp/native-build.log
+          status=${PIPESTATUS[0]}
+          if [ "$status" -ne 0 ]; then
+            # Surface the real error as an annotation (readable without log access):
+            # the first lines mentioning an error, plus the tail of the log.
+            {
+              echo "make limbo failed (exit $status). First error lines:"
+              grep -n -i -m 25 -E "error|No such file|not found|cannot|undefined" /tmp/native-build.log
+              echo "----- last 60 lines -----"
+              tail -n 60 /tmp/native-build.log
+            } > /tmp/native-build-summary.txt
+            summary=$(sed -e 's/%/%25/g' /tmp/native-build-summary.txt | awk '{printf "%s%%0A", $0}')
+            echo "::error title=Native build failed::${summary}"
+            exit "$status"
+          fi
 
       - name: Set up Gradle 7.0.2
         uses: gradle/actions/setup-gradle@v4
